@@ -2,6 +2,8 @@
 
 A Rust library for building clients and utilities for the Coinbase Prime REST APIs.
 
+The canonical source repository is **[coinbase/core_rs](https://github.com/coinbase/core_rs)**. The former [coinbase-samples/core_rs](https://github.com/coinbase-samples/core_rs) repository is deprecated.
+
 ## Overview
 
 The `core_rs` crate provides foundational HTTP, authentication, and error handling utilities for interacting with Coinbase Prime APIs. It is designed to be used as a building block for higher-level SDKs and applications.
@@ -14,12 +16,27 @@ The `core_rs` crate provides foundational HTTP, authentication, and error handli
 - Error handling with `thiserror`
 - Utilities for HTTP methods, headers, and status codes
 
+## Installation
+
+Add the library from [crates.io](https://crates.io/crates/core_rs):
+
+```sh
+cargo add core_rs
+```
+
+Or add it to your `Cargo.toml`:
+
+```toml
+[dependencies]
+core_rs = "0.2"
+```
+
 ## Setup
 
 ### 1. Clone the Repository
 
 ```sh
-git clone git@github.com:coinbase-samples/core-rs.git
+git clone git@github.com:coinbase/core_rs.git
 cd core_rs
 ```
 
@@ -33,4 +50,4 @@ cargo build
 
 ## License
 
-This project is licensed under the [Apache-2.0 license](LICENSE). 
+This project is licensed under the [Apache-2.0 license](LICENSE).
