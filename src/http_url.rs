@@ -43,3 +43,31 @@ impl HttpUrl {
             .map_err(|e| HttpUrlError(e.to_string()))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_accepts_absolute_urls_and_rejects_relative_paths() {
+        let parsed = HttpUrl::parse("https://api.coinbase.com")
+            .expect("absolute URL must parse");
+        assert_eq!(parsed.0.host_str(), Some("api.coinbase.com"));
+
+        let err = HttpUrl::parse("not a url")
+            .expect_err("garbage input must not parse");
+        assert!(!err.0.is_empty(), "error should carry a message");
+    }
+
+    #[test]
+    fn join_resolves_relative_paths_against_the_base_url() {
+        let base = HttpUrl::parse("https://api.coinbase.com").expect("base must parse");
+        let joined = base
+            .join("/api/v1/portfolios")
+            .expect("relative join must succeed");
+        assert_eq!(
+            joined.0.as_str(),
+            "https://api.coinbase.com/api/v1/portfolios"
+        );
+    }
+}

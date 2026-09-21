@@ -102,3 +102,77 @@ impl HttpRequest {
         *self.inner.url_mut() = url;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_request_stores_method_path_and_sane_defaults() {
+        let request = HttpRequest::new(HttpMethod::Get, "/api/v1/portfolios")
+            .expect("request creation must succeed");
+        assert_eq!(request.get_method(), "GET");
+        assert_eq!(request.path.as_deref(), Some("/api/v1/portfolios"));
+        assert!(request.retry_policy.is_none());
+        assert!(request.query_params.is_none());
+        assert!(request.json_body.is_none());
+    }
+
+    #[test]
+    fn builder_methods_populate_optional_fields() {
+        let mut params = std::collections::HashMap::new();
+        params.insert("limit".to_string(), "10".to_string());
+
+        let request = HttpRequest::new(HttpMethod::Post, "/api/v1/orders")
+            .expect("request creation must succeed")
+            .with_query_params(params)
+            .with_json_body(serde_json::json!({"size": 1}))
+            .with_retry_policy(RetryPolicy {
+                max_attempts: 3,
+                backoff_millis: 50,
+            });
+
+        assert_eq!(request.get_method(), "POST");
+        assert_eq!(
+            request
+                .query_params
+                .as_ref()
+                .and_then(|p| p.get("limit").map(|v| v.as_str())),
+            Some("10")
+        );
+        assert_eq!(
+            request
+                .json_body
+                .as_ref()
+                .and_then(|v| v.get("size").and_then(|n| n.as_i64())),
+            Some(1)
+        );
+        let policy = request
+            .retry_policy
+            .as_ref()
+            .expect("retry policy must be set");
+        assert_eq!(policy.max_attempts, 3);
+        assert_eq!(policy.backoff_millis, 50);
+    }
+
+    #[test]
+    fn add_header_stores_valid_headers_and_rejects_invalid_ones() {
+        let mut request = HttpRequest::new(HttpMethod::Get, "/x")
+            .expect("request creation must succeed");
+
+        request
+            .add_header("X-Test", "value")
+            .expect("valid header must be accepted");
+        assert_eq!(
+            request
+                .as_reqwest()
+                .headers()
+                .get("x-test")
+                .and_then(|v| v.to_str().ok()),
+            Some("value")
+        );
+
+        // A header name with invalid characters must return an error, not panic.
+        assert!(request.add_header("bad header\u{0007}name", "v").is_err());
+    }
+}

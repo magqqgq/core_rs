@@ -34,6 +34,10 @@ pub struct ReqwestClient {
     post_interceptors: Vec<Arc<dyn PostRequestInterceptor>>,
     default_retry_policy: Option<RetryPolicy>,
     base_url: Option<HttpUrl>,
+    /// Construction error recorded by a builder method (invalid base URL or
+    /// failed client build). Returned by `execute` instead of panicking so
+    /// library callers always receive a typed error, never an abort.
+    client_error: Option<String>,
 }
 
 impl ReqwestClient {
@@ -44,26 +48,36 @@ impl ReqwestClient {
             post_interceptors: Vec::new(),
             default_retry_policy: None,
             base_url: None,
+            client_error: None,
         }
     }
 
     pub fn with_base_url(mut self, base_url: &str) -> Self {
-        self.base_url = match HttpUrl::parse(base_url) {
-            Ok(url) => Some(url),
-            Err(e) => {
-                panic!("Invalid base URL: {}", e);
-            }
-        };
+        match HttpUrl::parse(base_url) {
+            Ok(url) => self.base_url = Some(url),
+            // Record the failure instead of panicking; `execute` surfaces it
+            // to the caller as a typed error.
+            Err(e) => self.client_error = Some(format!("Invalid base URL: {e}")),
+        }
         self
     }
 
     /// Set default headers for all requests. Overrides previous default headers if called multiple times.
     pub fn with_default_headers(mut self, headers: HttpHeaders) -> Self {
         let header_map = reqwest::header::HeaderMap::from(&headers);
-        self.client = reqwest::Client::builder()
+        match reqwest::Client::builder()
             .default_headers(header_map)
             .build()
-            .expect("Failed to build reqwest client with default headers");
+        {
+            Ok(client) => self.client = client,
+            // Record the failure instead of panicking; `execute` surfaces it
+            // to the caller as a typed error.
+            Err(e) => {
+                self.client_error = Some(format!(
+                    "Failed to build reqwest client with default headers: {e}"
+                ));
+            }
+        }
         self
     }
 
@@ -83,10 +97,24 @@ impl ReqwestClient {
     }
 }
 
+impl Default for ReqwestClient {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait]
 impl HttpClient for ReqwestClient {
     async fn execute(&self, mut request: HttpRequest) -> HttpResult<HttpResponse> {
-        // If base_url is set, join it with the request path (if relative) - do this FIRST
+        // Fail fast if the client was constructed with invalid configuration
+        // (e.g. an unparseable base URL). Builders record these errors instead
+        // of panicking so library callers always get a typed error.
+        if let Some(message) = &self.client_error {
+            return Err(HttpError::Custom(message.clone()));
+        }
+
+        // Resolve the final request URL before interceptors run so that
+        // signing/inspection interceptors observe the correct target.
         if let Some(base_url) = &self.base_url {
             if let Some(ref path) = request.path {
                 match base_url.join(path) {
@@ -101,14 +129,28 @@ impl HttpClient for ReqwestClient {
                     }
                 }
             }
+        } else if let Some(ref path) = request.path {
+            // Without a base URL the request path must itself be an absolute
+            // URL. Otherwise the request would silently target the placeholder
+            // host baked in by `HttpRequest::new`.
+            match HttpUrl::parse(path) {
+                Ok(url) => {
+                    let mut_req = request.as_mut_reqwest();
+                    *mut_req.url_mut() = url.0;
+                }
+                Err(_) => {
+                    return Err(HttpError::Custom(
+                        "Request path is relative but no base URL is configured; \
+                         provide an absolute URL or set a base URL"
+                            .to_string(),
+                    ));
+                }
+            }
         }
 
-        // Pre-request interceptors (now they'll see the correct URL)
-        for interceptor in &self.pre_interceptors {
-            interceptor.intercept(&mut request).await?;
-        }
-
-        // Append query parameters if present
+        // Append query parameters BEFORE pre-request interceptors so that
+        // interceptors that sign or validate the request observe the final
+        // URL including its query string.
         if let Some(ref params) = request.query_params {
             let mut url = request.as_reqwest().url().clone();
             {
@@ -120,6 +162,12 @@ impl HttpClient for ReqwestClient {
             let mut_req = request.as_mut_reqwest();
             *mut_req.url_mut() = url;
         }
+
+        // Pre-request interceptors (they now see the fully resolved URL).
+        for interceptor in &self.pre_interceptors {
+            interceptor.intercept(&mut request).await?;
+        }
+
         // Set JSON body if present
         if let Some(json) = &request.json_body {
             let json_string = json.to_string();

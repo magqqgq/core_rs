@@ -13,6 +13,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+// This crate intentionally contains no unsafe code; forbid it at the crate root.
+#![forbid(unsafe_code)]
+
 pub mod credentials;
 pub mod error;
 pub mod http_client;

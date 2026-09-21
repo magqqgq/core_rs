@@ -40,3 +40,39 @@ impl From<&HttpHeaders> for reqwest::header::HeaderMap {
         map
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn valid_headers_convert_to_reqwest_header_map() {
+        let mut headers = HttpHeaders::new();
+        headers.insert("Content-Type", "application/json");
+        headers.insert("X-Custom-Trace", "abc123");
+
+        let map = reqwest::header::HeaderMap::from(&headers);
+        assert_eq!(map.len(), 2);
+        assert_eq!(
+            map.get("content-type")
+                .and_then(|v| v.to_str().ok()),
+            Some("application/json")
+        );
+        assert_eq!(
+            map.get("x-custom-trace").and_then(|v| v.to_str().ok()),
+            Some("abc123")
+        );
+    }
+
+    #[test]
+    fn invalid_header_entries_are_skipped_during_conversion() {
+        let mut headers = HttpHeaders::new();
+        headers.insert("X-Valid", "ok");
+        // A control character is rejected by HeaderValue::from_str.
+        headers.insert("X-Invalid", "bad\u{0007}value");
+
+        let map = reqwest::header::HeaderMap::from(&headers);
+        assert_eq!(map.len(), 1, "only the valid header must survive");
+        assert!(map.get("x-valid").is_some());
+    }
+}

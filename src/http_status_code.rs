@@ -268,3 +268,52 @@ impl std::fmt::Display for HttpStatusCode {
         write!(f, "{}", self.as_u16())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn known_status_codes_convert_from_reqwest_and_round_trip() {
+        let samples: [(u16, HttpStatusCode); 7] = [
+            (100, HttpStatusCode::Continue),
+            (200, HttpStatusCode::Ok),
+            (301, HttpStatusCode::MovedPermanently),
+            (404, HttpStatusCode::NotFound),
+            (429, HttpStatusCode::TooManyRequests),
+            (500, HttpStatusCode::InternalServerError),
+            (599, HttpStatusCode::Custom(599)),
+        ];
+        for (code, expected) in samples {
+            let status = reqwest::StatusCode::from_u16(code)
+                .expect("sample code must be a valid HTTP status");
+            let converted: HttpStatusCode = status.into();
+            assert_eq!(converted, expected, "conversion mismatch for {code}");
+            assert_eq!(converted.as_u16(), code, "round trip mismatch for {code}");
+        }
+    }
+
+    #[test]
+    fn classification_helpers_cover_each_status_range() {
+        assert!(HttpStatusCode::Ok.is_success());
+        assert!(!HttpStatusCode::Ok.is_error());
+
+        assert!(HttpStatusCode::Continue.is_informational());
+        assert!(!HttpStatusCode::Continue.is_success());
+
+        assert!(HttpStatusCode::Found.is_redirection());
+        assert!(!HttpStatusCode::Found.is_success());
+
+        assert!(HttpStatusCode::NotFound.is_client_error());
+        assert!(HttpStatusCode::NotFound.is_error());
+        assert!(!HttpStatusCode::NotFound.is_server_error());
+
+        assert!(HttpStatusCode::ServiceUnavailable.is_server_error());
+        assert!(HttpStatusCode::ServiceUnavailable.is_error());
+        assert!(!HttpStatusCode::ServiceUnavailable.is_client_error());
+
+        // Unregistered codes fall back to Custom and still classify by range.
+        assert!(HttpStatusCode::Custom(599).is_server_error());
+        assert!(HttpStatusCode::Custom(499).is_client_error());
+    }
+}
